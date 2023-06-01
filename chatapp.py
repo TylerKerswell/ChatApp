@@ -9,12 +9,14 @@ DEFAULT_PORT = 5720
 PRIME = 31
 # primitive root mod PRIME
 BASE = 21
-# list that contains tuples of every (connection, address, key)
+# list that contains tuples of every (connection, address, key, connectionHasListener)
 connections = []
 # this devices ip address
 IP = socket.gethostbyname(socket.gethostname())
 # start the socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# semaphore for the server to use for incoming connections, we're basically just using it as a pre-made counter, but more efficently as we don't have to poll
+connectionSem = threading.Semaphore(0)
 
 
 # for now, this application uses the caesar cipher to encrypt/decrypt, 
@@ -25,16 +27,16 @@ def Encrypt(string, key):
 
     crypt = bytearray(string, "utf-8")
 
-    for byte in crypt:
-        byte = byte((int(byte) + key) % 256)
+    for bite in crypt:
+        bite = ((int(bite) + key) % 256).to_bytes()
 
     return crypt
 
 # function to decrypt a message given a key value, takes bytes and a key, returns a string
 def Decrypt(crypt, key):
 
-    for byte in crypt:
-        byte = byte((int(byte) - key) % 256)
+    for bite in crypt:
+        bite = ((int(bite) - key) % 256).to_bytes()
 
     return crypt.decode("utf-8")
 
@@ -49,6 +51,7 @@ def ClientConnect(ipAddr):
         connection[0].close()
     connections.clear()
 
+    PrintMessage(f"Trying to connect to {ipAddr}...")
     # establish the connection
     sock.connect((ipAddr, DEFAULT_PORT))
 
@@ -73,7 +76,9 @@ def ClientConnect(ipAddr):
     PrintMessage(f"key: {key}")
 
     # then add the connection to connections
-    connections.append((sock, ipAddr, key))
+    connections.append((sock, ipAddr, key, False))
+
+    # then, transfer this thread to listen on the connection
 
 
 
@@ -115,7 +120,10 @@ def ServerListen():
         PrintMessage(f"key with {addr}: {key}")
 
         # now we add this connection to the list of connections that the server has, and then listen for another one
-        connections.append((con, addr, key))
+        connections.append((con, addr, key, False))
+
+        # lastly, we notify the semaphore to start the listening connection in the handler
+        connectionSem.release(1)
 
 
 #  easily prints a message to the main gui
@@ -124,8 +132,9 @@ def PrintMessage(msg):
     messageDisplay.insert(tkinter.END, msg + '\n')
     messageDisplay.configure(state = "disabled")
 
+
 # only used in send message button
-def sendMsg():
+def SendMsg():
     Broadcast(messageEntry.get())
     PrintMessage("You: " + messageEntry.get())
     messageEntry.delete(0, tkinter.END)
@@ -134,15 +143,45 @@ def sendMsg():
 def Broadcast(msg):
     for connection in connections:
         crypticMessage = Encrypt(msg, connection[2])
+
+        print(f"sending {msg} to {connection[1]}")
+
         connection[0].send(crypticMessage)
 
 # handles receiving messages from all connected clients
 def ServerConnectionHandler():
-    pass
+    while True:
+        # when we are notified that a new connection is added, spin up a listening thread to listen to that connection
+        connectionSem.acquire()
+        for connection in connections:
+            if connection[3] == False:
+                listener = threading.Thread(target = Receiver, args = connection)
+
 
 # receives messages from one connection and handles accordingly
-def receiver(con, addr, key):
-    pass
+def Receiver(con, addr, key):
+    while True:
+        # wait to recieve a message from this specific connection
+        message = con.recv(4096)
+        message = Decrypt(message, key)
+
+        # print it to the server's screen and broadcast the message to all other connections
+        # depending on how long this step takes, the thread might miss receiving the next message which is a bug to deal with later
+        PrintMessage(addr + ": " + message)
+        for connection in connections:
+            if connection[0] != con:
+                msg = Encrypt(message, connection[2])
+                connection[0].send(message)
+
+
+
+# this function listens on the clients only connection and decrypts, then prints to the screen when something is sent. simple.
+def ClientReceiver():
+    while True:
+        message = connections[0][0].recv(4096)
+        message = Decrypt(message, connections[0][2])
+        PrintMessage(connections[0][1] + ": " + message)
+
 
 
 
@@ -205,6 +244,8 @@ messageDisplay.place(rely = 0.1, relheight = 0.8, relwidth = 1)
 if server.get() == 2:
     listeningThread = threading.Thread(target = ServerListen)
     listeningThread.start()
+    handler = threading.Thread(target = ServerConnectionHandler)
+    handler.start()
 
 
 
@@ -215,7 +256,7 @@ messageFrame.place(rely = 0.9, relheight = 0.1, relwidth = 1)
 messageEntry = tkinter.Entry(messageFrame)
 messageEntry.place(relwidth = 0.7, relheight = 1)
 
-messageButton = tkinter.Button(messageFrame, text = "Send message", command = sendMsg)
+messageButton = tkinter.Button(messageFrame, text = "Send message", command = SendMsg)
 messageButton.place(relx = 0.7, relwidth = 0.3, relheight = 1)
 
 
