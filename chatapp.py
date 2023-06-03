@@ -9,7 +9,11 @@ DEFAULT_PORT = 5720
 PRIME = 31
 # primitive root mod PRIME
 BASE = 21
-# list that contains tuples of every (connection, address, key, connectionHasListener)
+# list that contains every connection, connections are represented by a list of [connection, address, key, connectionHasListener], where:
+# connection = the socket connection
+# address = the IP address that the socket connects to
+# key = the key that encrypts/decrypts messages for that socket
+# connectionHasListener = boolean value that represents wheather or not that connection has a listener
 connections = []
 # this devices ip address
 IP = socket.gethostbyname(socket.gethostname())
@@ -17,6 +21,8 @@ IP = socket.gethostbyname(socket.gethostname())
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 # semaphore for the server to use for incoming connections, we're basically just using it as a pre-made counter, but more efficently as we don't have to poll
 connectionSem = threading.Semaphore(0)
+# list of all currently active threads to be used for shutdown
+activeThreads = []
 
 
 # for now, this application uses the caesar cipher to encrypt/decrypt, 
@@ -76,9 +82,11 @@ def ClientConnect(ipAddr):
     PrintMessage(f"key: {key}")
 
     # then add the connection to connections
-    connections.append((sock, ipAddr, key, False))
+    connections.append([sock, ipAddr, key, False])
 
-    # then, transfer this thread to listen on the connection
+    # then, make a thread to listen to the connection that was just created
+    listeningThread = threading.Thread(target = ClientReceiver)
+    listeningThread.start()
 
 
 
@@ -117,10 +125,10 @@ def ServerListen():
 
         # do the proper math with the servers response and print the key to show that it worked
         key = pow(publicNum, secret) % PRIME
-        PrintMessage(f"key with {addr}: {key}")
+        PrintMessage(f"key with {addr[0]}: {key}")
 
         # now we add this connection to the list of connections that the server has, and then listen for another one
-        connections.append((con, addr, key, False))
+        connections.append([con, addr, key, False])
 
         # lastly, we notify the semaphore to start the listening connection in the handler
         connectionSem.release(1)
@@ -143,9 +151,6 @@ def SendMsg():
 def Broadcast(msg):
     for connection in connections:
         crypticMessage = Encrypt(msg, connection[2])
-
-        print(f"sending {msg} to {connection[1]}")
-
         connection[0].send(crypticMessage)
 
 # handles receiving messages from all connected clients
@@ -155,7 +160,12 @@ def ServerConnectionHandler():
         connectionSem.acquire()
         for connection in connections:
             if connection[3] == False:
-                listener = threading.Thread(target = Receiver, args = connection)
+                # mark this connection as being listened on
+                connection[3] = True
+
+                # start the listening thread
+                listener = threading.Thread(target = Receiver, args = [connection[0], connection[1], connection[2]])
+                listener.start()
 
 
 # receives messages from one connection and handles accordingly
@@ -167,11 +177,11 @@ def Receiver(con, addr, key):
 
         # print it to the server's screen and broadcast the message to all other connections
         # depending on how long this step takes, the thread might miss receiving the next message which is a bug to deal with later
-        PrintMessage(addr + ": " + message)
+        PrintMessage(addr[0] + ": " + message)
         for connection in connections:
             if connection[0] != con:
                 msg = Encrypt(message, connection[2])
-                connection[0].send(message)
+                connection[0].send(msg)
 
 
 
@@ -189,7 +199,7 @@ def ClientReceiver():
 # START MENU
 # we use a start menu to let the user determine if they want a server or a client application to run
 startMenu = tkinter.Tk()
-startMenu.title("choose an option")
+startMenu.title("choose an mode for this application")
 startMenu.geometry("300x150+50+50")
 
 # variable for keeping track of wheather or not this application is a server. Defaults to client
