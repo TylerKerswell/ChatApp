@@ -9,11 +9,12 @@ DEFAULT_PORT = 5720
 PRIME = 31
 # primitive root mod PRIME
 BASE = 21
-# list that contains every connection, connections are represented by a list of [connection, address, key, connectionHasListener], where:
+# list that contains every connection, connections are represented by a list of [connection, address, key, connectionHasListener, username], where:
 # connection = the socket connection
 # address = the IP address that the socket connects to
 # key = the key that encrypts/decrypts messages for that socket
 # connectionHasListener = boolean value that represents wheather or not that connection has a listener
+# username = username of client
 connections = []
 # this devices ip address
 IP = socket.gethostbyname(socket.gethostname())
@@ -75,6 +76,9 @@ def ClientConnect(ipAddr):
     sock.send(int.to_bytes(send))
     bytesRecvd = sock.recv(4096)
 
+    # send our username to the server, unencrypted
+    sock.send(username.encode("utf-8"))
+
     publicNum = int.from_bytes(bytesRecvd, "little")
 
     # do the proper math with the servers response and print the key to show that it worked
@@ -120,6 +124,12 @@ def ServerListen():
 
         con.send(int.to_bytes(send))
 
+        # recieve the username from the client connection
+        clientUsername = con.recv(4096)
+        clientUsername = clientUsername.decode("utf-8")
+
+        PrintMessage(f"their username is: {clientUsername}")
+
         # get the key from what the client sent us
         publicNum = int.from_bytes(bytesRecvd, "little")
 
@@ -128,7 +138,7 @@ def ServerListen():
         PrintMessage(f"key with {addr[0]}: {key}")
 
         # now we add this connection to the list of connections that the server has, and then listen for another one
-        connections.append([con, addr, key, False])
+        connections.append([con, addr, key, False, clientUsername])
 
         # lastly, we notify the semaphore to start the listening connection in the handler
         connectionSem.release(1)
@@ -149,6 +159,7 @@ def SendMsg():
 
 #  broadcasts a single message to all connections
 def Broadcast(msg):
+    msg = username + ": " + msg
     for connection in connections:
         crypticMessage = Encrypt(msg, connection[2])
         connection[0].send(crypticMessage)
@@ -177,7 +188,7 @@ def Receiver(con, addr, key):
 
         # print it to the server's screen and broadcast the message to all other connections
         # depending on how long this step takes, the thread might miss receiving the next message which is a bug to deal with later
-        PrintMessage(addr[0] + ": " + message)
+        PrintMessage(message)
         for connection in connections:
             if connection[0] != con:
                 msg = Encrypt(message, connection[2])
@@ -190,17 +201,34 @@ def ClientReceiver():
     while True:
         message = connections[0][0].recv(4096)
         message = Decrypt(message, connections[0][2])
-        PrintMessage(connections[0][1] + ": " + message)
+        PrintMessage(message)
+
+
+
+# behaviour for when the user clicks the confirm button
+def ConfirmButton():
+    global username
+    username = usernameInput.get()
+    startMenu.destroy()
 
 
 
 
 
 # START MENU
-# we use a start menu to let the user determine if they want a server or a client application to run
+# we use a start menu to let the user determine if they want a server or a client application to run and also for the user to choose their username
 startMenu = tkinter.Tk()
-startMenu.title("choose an mode for this application")
+startMenu.title("choose an mode for this application and a username")
 startMenu.geometry("300x150+50+50")
+
+# text prompt for username
+usernameLabel = tkinter.Label(startMenu, text = "Username:")
+usernameLabel.pack()
+
+# entrybox for username
+usernameInput = tkinter.Entry(startMenu)
+usernameInput.pack()
+
 
 # variable for keeping track of wheather or not this application is a server. Defaults to client
 server = tkinter.IntVar(value = 1)
@@ -217,7 +245,7 @@ serverButton = tkinter.Radiobutton(startMenu, text = "Server", variable = server
 serverButton.pack()
 
 # button destroys the start menu and moves onto the main chat GUI
-confirmButton = tkinter.Button(startMenu, text = "Confirm", command = startMenu.destroy)
+confirmButton = tkinter.Button(startMenu, text = "Confirm", command = ConfirmButton)
 confirmButton.pack()
 
 
@@ -230,7 +258,7 @@ startMenu.mainloop()
 
 # MAIN WINDOW
 root = tkinter.Tk()
-root.title("chat app")
+root.title(f"Logged in as {username}")
 root.geometry("600x400+50+50")
 root.resizable(False, True)
 
@@ -271,19 +299,3 @@ messageButton.place(relx = 0.7, relwidth = 0.3, relheight = 1)
 
 
 root.mainloop()
-
-
-# let the user decide if this should be a server or a client
-# start = input("Would you like to wait to recieve a connection? [Y/N] ")
-
-# # if no, this device is a client, if anything else, its a server
-# if start.lower() == "n" or start.lower() == "no":
-#     key, con = ClientConnect()
-# else:
-#     key, con = ServerConnect()
-
-# # now that the key exchange has been done and we are connected, we will start threads to handle sending and receiving of messages
-
-# receThread = threading.Thread(target=receiving, args=(con, key))
-# receThread.start()
-# sending(con, key)
