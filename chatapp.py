@@ -2,6 +2,7 @@ import socket
 import random
 import threading
 import tkinter
+import encryption
 
 # default port to listen on to synchronize the app
 DEFAULT_PORT = 5720
@@ -24,31 +25,6 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 connectionSem = threading.Semaphore(0)
 # list of all currently active threads to be used for shutdown
 activeThreads = []
-
-
-# for now, this application uses the caesar cipher to encrypt/decrypt, 
-# this will be updated as this application gets further developed
-
-# function to encrypt a message given a key value, takes a string and a key, returns bytes
-def Encrypt(string, key):
-
-    crypt = bytearray(string, "utf-8")
-
-    for bite in crypt:
-        bite = ((int(bite) + key) % 256).to_bytes()
-
-    return crypt
-
-# function to decrypt a message given a key value, takes bytes and a key, returns a string
-def Decrypt(crypt, key):
-
-    for bite in crypt:
-        bite = ((int(bite) - key) % 256).to_bytes()
-
-    return crypt.decode("utf-8")
-
-
-
 
 # function to handle the client side key exchange
 def ClientConnect(ipAddr):
@@ -161,7 +137,7 @@ def SendMsg():
 def Broadcast(msg):
     msg = username + ": " + msg
     for connection in connections:
-        crypticMessage = Encrypt(msg, connection[2])
+        crypticMessage = encryption.Encrypt(msg, connection[2])
         connection[0].send(crypticMessage)
 
 # handles receiving messages from all connected clients
@@ -184,14 +160,14 @@ def Receiver(con, addr, key):
     while True:
         # wait to recieve a message from this specific connection
         message = con.recv(4096)
-        message = Decrypt(message, key)
+        message = encryption.Decrypt(message, key)
 
         # print it to the server's screen and broadcast the message to all other connections
         # depending on how long this step takes, the thread might miss receiving the next message which is a bug to deal with later
         PrintMessage(message)
         for connection in connections:
             if connection[0] != con:
-                msg = Encrypt(message, connection[2])
+                msg = encryption.Encrypt(message, connection[2])
                 connection[0].send(msg)
 
 
@@ -200,7 +176,7 @@ def Receiver(con, addr, key):
 def ClientReceiver():
     while True:
         message = connections[0][0].recv(4096)
-        message = Decrypt(message, connections[0][2])
+        message = encryption.Decrypt(message, connections[0][2])
         PrintMessage(message)
 
 
