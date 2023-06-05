@@ -23,7 +23,7 @@ def Encrypt(string, key):
     return crypt
 
 
-# function for TEA, left and right are 4 bytes to encrypt and key is a 16 byte key, returns 2, 4-byte encrypted bytes
+# helper function for TEA, left and right are 4 bytes to encrypt and key is a 16 byte key, returns 2, 4-byte encrypted bytes
 def EncryptCycles(left, right, key):
 
     # we must convert all our inputs to integers, because python can't perform bitwise operators on non-integer types -_-

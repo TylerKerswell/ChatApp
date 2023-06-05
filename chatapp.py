@@ -1,15 +1,11 @@
 import socket
-import random
 import threading
 import tkinter
 import encryption
+import key_exchg
 
 # default port to listen on to synchronize the app
 DEFAULT_PORT = 5720
-# prime number used in the key exchange
-PRIME = 31
-# primitive root mod PRIME
-BASE = 21
 # list that contains every connection, connections are represented by a list of [connection, address, key, connectionHasListener, username], where:
 # connection = the socket connection
 # address = the IP address that the socket connects to
@@ -40,26 +36,12 @@ def ClientConnect(ipAddr):
 
     PrintMessage(f"Connection established with {ipAddr}")
 
-    # do the key exchange, client goes first
-
-    # choose a random number and then perform the math on it (see Wikipedia page on Diffie-Hellman key exchange for more information)
-    secret = random.randrange(1, 20)
-    PrintMessage(f"secret number chosen: {secret}")
-
-    send = pow(BASE, secret) % PRIME
-
-    # send and wait for servers response
-    sock.send(int.to_bytes(send))
-    bytesRecvd = sock.recv(4096)
-
-    # send our username to the server, unencrypted
+    # once we've established the connection, give the server our username
     sock.send(username.encode("utf-8"))
 
-    publicNum = int.from_bytes(bytesRecvd, "little")
-
-    # do the proper math with the servers response and print the key to show that it worked
-    key = pow(publicNum, secret) % PRIME
-    PrintMessage(f"key: {key}")
+    # do the key exchange
+    key, secret = key_exchg.ClientExchange(sock)
+    PrintMessage(f"Secret used: {secret}\nKey aquired: {key}")
 
     # then add the connection to connections
     connections.append([sock, ipAddr, key, False])
@@ -88,33 +70,16 @@ def ServerListen():
 
         PrintMessage(f"connection established with {addr[0]}")
 
-        # do the key exchange, client goes first
+        # recieve the clients username
+        name = con.recv(4096)
+        PrintMessage(f"Their username is: {name}")
 
-        # wait to receive the clients secret
-        bytesRecvd = con.recv(4096)
-
-        # choose our own secret number and do the math to send it to the client
-        secret = random.randrange(1, 20)
-        PrintMessage(f"secret number chosen: {secret}")
-        send = pow(BASE, secret) % PRIME
-
-        con.send(int.to_bytes(send))
-
-        # recieve the username from the client connection
-        clientUsername = con.recv(4096)
-        clientUsername = clientUsername.decode("utf-8")
-
-        PrintMessage(f"their username is: {clientUsername}")
-
-        # get the key from what the client sent us
-        publicNum = int.from_bytes(bytesRecvd, "little")
-
-        # do the proper math with the servers response and print the key to show that it worked
-        key = pow(publicNum, secret) % PRIME
-        PrintMessage(f"key with {addr[0]}: {key}")
+        # do the key exchange
+        key, secret = key_exchg.ServerExchange(con)
+        PrintMessage(f"Secret used: {secret}\nKey: {key}")
 
         # now we add this connection to the list of connections that the server has, and then listen for another one
-        connections.append([con, addr, key, False, clientUsername])
+        connections.append([con, addr, key, False, name])
 
         # lastly, we notify the semaphore to start the listening connection in the handler
         connectionSem.release(1)
@@ -127,7 +92,8 @@ def PrintMessage(msg):
     messageDisplay.configure(state = "disabled")
 
 
-# only used in send message button
+# only used in send message button, 
+# sends the message to all connections, prints it to the screen, then deletes whatevers inside the message entry box
 def SendMsg():
     Broadcast(messageEntry.get())
     PrintMessage("You: " + messageEntry.get())
